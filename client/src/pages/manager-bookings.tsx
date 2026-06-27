@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { AppHeader } from "@/components/app-header";
@@ -79,6 +79,7 @@ interface Booking {
   totalAmount: number;
   notes: string | null;
   createdAt?: string;
+  source?: "ekhaya" | "local";
 }
 
 const statusColors: Record<string, string> = {
@@ -88,6 +89,12 @@ const statusColors: Record<string, string> = {
   CANCELLED: "bg-red-500/20 text-red-400 border-red-500/30",
   NO_SHOW: "bg-gray-500/20 text-gray-400 border-gray-500/30",
   READY_FOR_PICKUP: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  confirmed: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  in_progress: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  completed: "bg-green-500/20 text-green-400 border-green-500/30",
+  cancelled: "bg-red-500/20 text-red-400 border-red-500/30",
+  no_show: "bg-gray-500/20 text-gray-400 border-gray-500/30",
+  ready_for_pickup: "bg-purple-500/20 text-purple-400 border-purple-500/30",
 };
 
 export default function ManagerBookings() {
@@ -158,6 +165,40 @@ export default function ManagerBookings() {
     },
     enabled: canManageBookings,
   });
+
+  const { data: localData, isLoading: localLoading } = useQuery({
+    queryKey: ["manager-bookings-local", search, statusFilter, dateFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (search) params.append("search", search);
+      if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
+      if (dateFilter) {
+        params.append("fromDate", dateFilter);
+        params.append("toDate", dateFilter);
+      }
+      params.append("limit", "50");
+      const res = await fetch(`/api/manager/bookings?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) return { bookings: [] as Booking[], total: 0 };
+      return res.json() as Promise<{ bookings: Booking[]; total: number }>;
+    },
+    enabled: canManageBookings,
+  });
+
+  const mergedBookings = useMemo(() => {
+    const crm = (data?.bookings || []).map((b) => ({ ...b, source: "ekhaya" as const }));
+    const local = (localData?.bookings || []).map((b) => ({
+      ...b,
+      source: "local" as const,
+      status: b.status?.toUpperCase?.() || b.status,
+    }));
+    return [...crm, ...local].sort((a, b) => {
+      const dateCmp = `${b.bookingDate}`.localeCompare(`${a.bookingDate}`);
+      if (dateCmp !== 0) return dateCmp;
+      return `${a.timeSlot}`.localeCompare(`${b.timeSlot}`);
+    });
+  }, [data?.bookings, localData?.bookings]);
+
+  const bookingsLoading = isLoading || localLoading;
 
   // Update booking mutation
   const updateMutation = useMutation({
@@ -403,6 +444,10 @@ export default function ManagerBookings() {
   };
 
   const openEditDialog = (booking: Booking) => {
+    if (booking.source === "local") {
+      toast({ title: "Self-service booking", description: "Edit local bookings from the app dashboard or contact the customer directly." });
+      return;
+    }
     setSelectedBooking(booking);
     setEditDate(booking.bookingDate.split("T")[0]);
     setEditTimeSlot(booking.timeSlot);
@@ -554,7 +599,7 @@ export default function ManagerBookings() {
         )}
 
         {/* Bookings List */}
-        {isLoading ? (
+        {bookingsLoading ? (
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
               <Card key={i}>
@@ -564,7 +609,7 @@ export default function ManagerBookings() {
               </Card>
             ))}
           </div>
-        ) : data?.bookings.length === 0 ? (
+        ) : mergedBookings.length === 0 ? (
           <Card>
             <CardContent className="pt-6 text-center">
               <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -576,8 +621,8 @@ export default function ManagerBookings() {
           </Card>
         ) : (
           <div className="space-y-4">
-            {data?.bookings.map((booking) => (
-              <Card key={booking.id} className="overflow-hidden">
+            {mergedBookings.map((booking) => (
+              <Card key={`${booking.source}-${booking.id}`} className="overflow-hidden">
                 <CardContent className="p-4">
                   <div className="flex flex-col md:flex-row md:items-center gap-4">
                     {/* Booking Info */}
@@ -586,8 +631,11 @@ export default function ManagerBookings() {
                         <span className="font-mono text-sm font-semibold text-primary">
                           #{booking.bookingReference}
                         </span>
-                        <Badge className={statusColors[booking.status] || ""}>
+                        <Badge className={statusColors[booking.status] || statusColors[booking.status.toLowerCase()] || ""}>
                           {booking.status.replace(/_/g, " ")}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {booking.source === "local" ? "Self-service" : "Ekhaya"}
                         </Badge>
                       </div>
 
@@ -642,7 +690,7 @@ export default function ManagerBookings() {
                         <Eye className="h-4 w-4 mr-1" />
                         View
                       </Button>
-                      {booking.status !== "CANCELLED" && (
+                      {booking.source !== "local" && booking.status !== "CANCELLED" && (
                         <Button
                           size="sm"
                           className="bg-green-600 hover:bg-green-700 text-white"
@@ -652,7 +700,7 @@ export default function ManagerBookings() {
                           Payment
                         </Button>
                       )}
-                      {booking.status !== "COMPLETED" && booking.status !== "CANCELLED" && (
+                      {booking.source !== "local" && booking.status !== "COMPLETED" && booking.status !== "CANCELLED" && (
                         <>
                           <Button
                             variant="outline"

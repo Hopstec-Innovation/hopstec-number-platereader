@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Car, Clock, Calendar, CheckCircle2, User, MapPin } from "lucide-react";
+import { ArrowLeft, Car, Clock, Calendar, CheckCircle2, User, MapPin, Play } from "lucide-react";
 import { CompactFooter } from "@/components/app-footer";
 import type { WashJob, WashStatus } from "@shared/schema";
 import { formatDistanceToNow, format } from "date-fns";
@@ -162,6 +162,17 @@ export default function MyJobs() {
                             {format(new Date(booking.bookingDate + "T00:00:00"), "EEE, MMM d")}
                           </p>
                         </div>
+                        <Button
+                          className="w-full mt-3"
+                          size="sm"
+                          onClick={() => setLocation(
+                            `/scan/carwash?plate=${encodeURIComponent(booking.licensePlate)}&bookingId=${encodeURIComponent(booking.id)}`
+                          )}
+                          data-testid={`button-start-wash-${booking.id}`}
+                        >
+                          <Play className="w-4 h-4 mr-2" />
+                          Start Wash
+                        </Button>
                       </Card>
                     </motion.div>
                   ))}

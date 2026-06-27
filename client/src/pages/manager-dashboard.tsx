@@ -48,7 +48,7 @@ import {
   Car, ParkingSquare, Activity, Users, RefreshCw, Clock,
   TrendingUp, Calendar, Target, ArrowRight, Zap, Settings, DollarSign,
   Search, Eye, Edit, Trash2, X, Phone, Mail, User, CalendarDays, AlertTriangle, Timer, Award, Package,
-  CreditCard, CheckCircle2, Receipt, Printer, Download, Send
+  CreditCard, CheckCircle2, Receipt, Printer, Download, Send, MessageSquare, Palette
 } from "lucide-react";
 import type { WashJob, WashStatus } from "@shared/schema";
 import { formatDistanceToNow, format } from "date-fns";
@@ -150,6 +150,16 @@ export default function ManagerDashboard() {
     growthRate: { usersLast3Months: number; membersLast3Months: number };
   }>({
     queryKey: ["/api/crm/growth-analytics"],
+  });
+
+  const { data: bookingAnalytics } = useQuery<{
+    todayBookings: number;
+    weekBookings: number;
+    monthBookings: number;
+    completionRate: number;
+    bookingRevenue: number;
+  }>({
+    queryKey: ["/api/manager/booking-analytics"],
   });
 
   const upcomingBookings = crmBookings?.filter(b => b.status === "CONFIRMED").slice(0, 5) || [];
@@ -463,11 +473,15 @@ export default function ManagerDashboard() {
   const navItems = [
     { href: "/manager", label: "Live Queue", icon: Activity },
     { href: "/manager/bookings", label: "Bookings", icon: CalendarDays },
+    { href: "/manager/timeslots", label: "Schedule", icon: Clock },
     { href: "/manager/roster", label: "Roster", icon: Timer },
+    { href: "/staff/messages", label: "Messages", icon: MessageSquare },
     { href: "/manager/inventory", label: "Inventory", icon: Package },
     { href: "/manager/revenue", label: "Revenue", icon: DollarSign },
     { href: "/manager/customers", label: "Customers", icon: Users },
     { href: "/manager/analytics", label: "Analytics", icon: BarChart3 },
+    { href: "/manager/branding", label: "Branding", icon: Palette },
+    { href: "/manager/billing", label: "Billing", icon: CreditCard },
     { href: "/manager/audit", label: "Audit Log", icon: ClipboardList },
     { href: "/manager/settings", label: "Settings", icon: Settings },
   ];
@@ -607,6 +621,28 @@ export default function ManagerDashboard() {
 
           {/* Low Stock Alert */}
           <LowStockAlert />
+
+          {/* Local booking analytics (self-service + app) */}
+          {bookingAnalytics && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Card className="p-3">
+                <p className="text-xs text-muted-foreground">Bookings today</p>
+                <p className="text-xl font-bold">{bookingAnalytics.todayBookings}</p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-xs text-muted-foreground">This week</p>
+                <p className="text-xl font-bold">{bookingAnalytics.weekBookings}</p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-xs text-muted-foreground">Completion rate</p>
+                <p className="text-xl font-bold">{bookingAnalytics.completionRate}%</p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-xs text-muted-foreground">Revenue (30d)</p>
+                <p className="text-xl font-bold">R {((bookingAnalytics.bookingRevenue || 0) / 100).toFixed(0)}</p>
+              </Card>
+            </div>
+          )}
 
           {/* Daily Target Progress */}
           <Card className="p-4">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AppHeader } from "@/components/app-header";
@@ -42,19 +42,19 @@ interface TimeSlot {
 
 type Step = "service" | "date" | "slots" | "details" | "confirmed";
 
-const TENANT_ID = "default"; // adjust if multi-tenant
+const DEFAULT_TENANT = "default";
 
-function centsToDisplay(cents: number): string {
-  return `R ${(cents / 100).toFixed(2)}`;
+function getTenantId(): string {
+  if (typeof window === "undefined") return DEFAULT_TENANT;
+  return new URLSearchParams(window.location.search).get("tenant") || DEFAULT_TENANT;
 }
 
 function getNextDays(count: number): { label: string; value: string; dayName: string }[] {
   const days = [];
-  const today = new Date();
   for (let i = 0; i < count; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    const value = d.toISOString().split("T")[0];
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const value = new Intl.DateTimeFormat("en-CA").format(d);
     const label = d.toLocaleDateString("en-ZA", { day: "numeric", month: "short" });
     const dayName = i === 0 ? "Today" : i === 1 ? "Tomorrow" : d.toLocaleDateString("en-ZA", { weekday: "long" });
     days.push({ label, value, dayName });
@@ -62,26 +62,36 @@ function getNextDays(count: number): { label: string; value: string; dayName: st
   return days;
 }
 
+function centsToDisplay(cents: number): string {
+  return `R ${(cents / 100).toFixed(2)}`;
+}
+
 export default function CustomerBooking() {
+  const tenantId = useMemo(() => getTenantId(), []);
+  const initialPlate = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("plate") || "";
+  }, []);
   const { toast } = useToast();
   const [step, setStep] = useState<Step>("service");
   const [selectedService, setSelectedService] = useState<BookingService | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedSlot, setSelectedSlot] = useState<string>("");
-  const [form, setForm] = useState({ name: "", phone: "", email: "", plate: "" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", plate: initialPlate });
+  const [confirmedRef, setConfirmedRef] = useState("");
 
   const days = getNextDays(14);
 
   const { data: services = [], isLoading: servicesLoading } = useQuery<BookingService[]>({
-    queryKey: ["/api/booking/services", TENANT_ID],
+    queryKey: ["/api/booking/services", tenantId],
     queryFn: () =>
-      fetch(`/api/booking/services?tenantId=${TENANT_ID}`).then((r) => r.json()),
+      fetch(`/api/booking/services?tenantId=${tenantId}`).then((r) => r.json()),
   });
 
   const { data: slots = [], isLoading: slotsLoading } = useQuery<TimeSlot[]>({
     queryKey: ["/api/booking/available-slots", selectedDate],
     queryFn: () =>
-      fetch(`/api/booking/available-slots?date=${selectedDate}&tenantId=${TENANT_ID}`).then((r) => r.json()),
+      fetch(`/api/booking/available-slots?date=${selectedDate}&tenantId=${tenantId}`).then((r) => r.json()),
     enabled: !!selectedDate,
   });
 
@@ -91,7 +101,7 @@ export default function CustomerBooking() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tenantId: TENANT_ID,
+          tenantId,
           serviceId: selectedService?.id,
           date: selectedDate,
           time: selectedSlot,
@@ -107,7 +117,10 @@ export default function CustomerBooking() {
       }
       return res.json();
     },
-    onSuccess: () => setStep("confirmed"),
+    onSuccess: (data) => {
+      setConfirmedRef(data.bookingReference || data.bookingId?.slice(0, 8)?.toUpperCase() || "");
+      setStep("confirmed");
+    },
     onError: (err: Error) =>
       toast({ title: "Booking failed", description: err.message, variant: "destructive" }),
   });
@@ -509,13 +522,19 @@ export default function CustomerBooking() {
                 <div>
                   <h2 className="text-2xl font-bold mb-2">Booking Confirmed!</h2>
                   <p className="text-muted-foreground">
-                    Thank you, <strong>{form.name}</strong>! Your booking has been received.
-                    We'll contact you{form.phone ? ` on ${form.phone}` : ""} to confirm your appointment.
+                    Thank you, <strong>{form.name}</strong>! Your appointment is booked
+                    {confirmedRef ? <> — reference <strong className="font-mono">{confirmedRef}</strong></> : ""}.
                   </p>
                 </div>
 
                 <Card className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950 text-left">
                   <CardContent className="py-4 space-y-2 text-sm">
+                    {confirmedRef && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Reference</span>
+                        <span className="font-mono font-semibold">{confirmedRef}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Service</span>
                       <span className="font-semibold">{selectedService?.name}</span>

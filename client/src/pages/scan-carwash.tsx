@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -19,8 +19,9 @@ import { Badge } from "@/components/ui/badge";
 import {
   ArrowLeft, Camera, Keyboard, Loader2, Car, Award,
   Clock, ChevronRight, CheckCircle2, Ticket, UserPlus,
-  Phone, Mail, CreditCard, ShieldCheck
+  Phone, Mail, CreditCard, ShieldCheck, CalendarDays
 } from "lucide-react";
+import { guessPackageFromServiceName } from "@/lib/crm-booking-utils";
 import type { CountryHint, VehicleSize } from "@shared/schema";
 import { SERVICE_PACKAGES, SERVICE_TIER_COLORS, VEHICLE_SIZES } from "@shared/schema";
 import type { ServiceTier } from "@shared/schema";
@@ -55,16 +56,44 @@ export default function ScanCarwash() {
   const [walkinForm, setWalkinForm] = useState({ name: "", phone: "", email: "", consent: false });
   const [walkinLoading, setWalkinLoading] = useState(false);
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [linkedBookingId, setLinkedBookingId] = useState<string | null>(null);
+
+  // Deep link from My Jobs: /scan/carwash?plate=ABC123&bookingId=...
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const plate = params.get("plate");
+    const bookingId = params.get("bookingId");
+    if (bookingId) setLinkedBookingId(bookingId);
+    if (!plate) return;
+
+    setPendingPlate({ plate, countryHint: "OTHER" });
+    setIsLookingUp(true);
+    fetch(`/api/customer/lookup-by-plate?plate=${encodeURIComponent(plate)}`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) {
+          setCustomerLookup(data);
+          if (data.crmTodayBooking?.id) setLinkedBookingId(data.crmTodayBooking.id);
+          setShowMembershipInfo(true);
+        } else {
+          setShowServiceSelect(true);
+        }
+      })
+      .catch(() => setShowServiceSelect(true))
+      .finally(() => setIsLookingUp(false));
+  }, []);
 
   const createJobMutation = useMutation({
-    mutationFn: async ({ plate, countryHint, photo, servicePackageCode, vehicleSize }: {
+    mutationFn: async ({ plate, countryHint, photo, servicePackageCode, vehicleSize, bookingId }: {
       plate: string;
       countryHint: CountryHint;
       photo?: string;
       servicePackageCode: string;
       vehicleSize: VehicleSize;
+      bookingId?: string | null;
     }) => {
-      const payload = { plateDisplay: plate, countryHint, photo, servicePackageCode, vehicleSize };
+      const payload: Record<string, unknown> = { plateDisplay: plate, countryHint, photo, servicePackageCode, vehicleSize };
+      if (bookingId) payload.bookingId = bookingId;
 
       if (!navigator.onLine) {
         await enqueueRequest("POST", "/api/wash-jobs", payload);
@@ -151,6 +180,9 @@ export default function ScanCarwash() {
       if (res.ok) {
         const data = await res.json();
         setCustomerLookup(data);
+        if (data.crmTodayBooking?.id) {
+          setLinkedBookingId(data.crmTodayBooking.id);
+        }
         setIsLookingUp(false);
         setShowMembershipInfo(true);
         return;
@@ -163,6 +195,16 @@ export default function ScanCarwash() {
   };
 
   const handleMembershipContinue = () => {
+    const booking = customerLookup?.crmTodayBooking;
+    if (booking) {
+      const pkg = guessPackageFromServiceName(booking.serviceName);
+      if (pkg && SERVICE_PACKAGES[pkg]) {
+        setSelectedPackageCode(pkg);
+        setShowMembershipInfo(false);
+        setShowVehicleSize(true);
+        return;
+      }
+    }
     setShowMembershipInfo(false);
     setShowServiceSelect(true);
   };
@@ -232,6 +274,7 @@ export default function ScanCarwash() {
         photo: capturedImage || undefined,
         servicePackageCode: selectedPackageCode,
         vehicleSize: size,
+        bookingId: linkedBookingId,
       });
     }
   };
@@ -259,6 +302,13 @@ export default function ScanCarwash() {
       </header>
 
       <main className="max-w-lg mx-auto px-4 py-8">
+        {isLookingUp && (
+          <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span>Loading booking details...</span>
+          </div>
+        )}
+        {!isLookingUp && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -302,6 +352,7 @@ export default function ScanCarwash() {
             Enter Manually
           </Button>
         </motion.div>
+        )}
       </main>
 
       <PlateConfirmDialog
@@ -511,6 +562,25 @@ export default function ScanCarwash() {
               </h3>
               <p className="text-sm text-muted-foreground font-mono">{pendingPlate?.plate}</p>
             </div>
+
+            {customerLookup.crmTodayBooking && (
+              <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-4 space-y-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <CalendarDays className="w-4 h-4 text-blue-600" />
+                  <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Today's Booking</span>
+                </div>
+                <p className="text-sm font-medium">{customerLookup.crmTodayBooking.serviceName}</p>
+                <p className="text-sm text-muted-foreground">
+                  {customerLookup.crmTodayBooking.timeSlot}
+                  {customerLookup.crmTodayBooking.bookingDate && (
+                    <> · {customerLookup.crmTodayBooking.bookingDate.split("T")[0]}</>
+                  )}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Continue to use the booked service automatically
+                </p>
+              </div>
+            )}
 
             {customerLookup.crmMembership && (
               <div className="bg-muted/50 rounded-lg p-4 mb-4 space-y-2">

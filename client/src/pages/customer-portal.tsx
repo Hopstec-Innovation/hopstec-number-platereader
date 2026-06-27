@@ -395,7 +395,10 @@ export default function CustomerPortal() {
                       <div className="text-center py-8 space-y-3">
                         <CalendarDays className="w-8 h-8 mx-auto text-muted-foreground" />
                         <p className="text-sm text-muted-foreground">No bookings on record.</p>
-                        <Button variant="outline" size="sm" className="gap-2" onClick={() => window.location.href = "/book"}>
+                        <Button variant="outline" size="sm" className="gap-2" onClick={() => {
+                          const plate = encodeURIComponent(data.account.plateDisplay || "");
+                          window.location.href = plate ? `/book?plate=${plate}` : "/book";
+                        }}>
                           Book a wash
                           <ArrowRight className="w-3.5 h-3.5" />
                         </Button>
@@ -426,6 +429,20 @@ export default function CustomerPortal() {
                           </CardContent>
                         </Card>
                       ))
+                    )}
+                    {data.bookings.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-2 mt-2"
+                        onClick={() => {
+                          const plate = encodeURIComponent(data.account.plateDisplay || "");
+                          window.location.href = plate ? `/book?plate=${plate}` : "/book";
+                        }}
+                      >
+                        Book again
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </Button>
                     )}
                   </TabsContent>
                 </Tabs>

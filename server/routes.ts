@@ -109,6 +109,7 @@ const createWashJobSchema = z.object({
   servicePackageCode: z.string().optional(), // Named package (e.g. "VAMOS", "LA_OBRA")
   vehicleSize: z.enum(VEHICLE_SIZES).optional(), // small/medium/large for pricing
   customSteps: z.array(z.string()).optional(), // Custom step list override
+  bookingId: z.string().optional(), // Linked Ekhaya CRM booking ID
 });
 
 const updateStatusSchema = z.object({
@@ -371,7 +372,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: result.error.errors[0].message });
       }
 
-      const { plateDisplay, countryHint, photo, serviceCode, servicePackageCode, vehicleSize, customSteps } = result.data;
+      const { plateDisplay, countryHint, photo, serviceCode, servicePackageCode, vehicleSize, customSteps, bookingId } = result.data;
       const userId = req.user?.claims?.sub;
 
       // Save photo if provided
@@ -415,8 +416,16 @@ export async function registerRoutes(
         packageName: resolvedPackageName,
         vehicleSize: vehicleSize || null,
         price: resolvedPrice ? resolvedPrice * 100 : null, // store in cents
+        bookingId: bookingId || null,
         startAt: new Date(),
       });
+
+      // Sync linked CRM booking to in-progress when vehicle arrives
+      if (bookingId) {
+        updateBookingStatus(bookingId, "IN_PROGRESS").catch((err) => {
+          console.error("CRM booking IN_PROGRESS sync failed:", err);
+        });
+      }
 
       // Create customer access token for tracking
       const token = generateJobToken();
@@ -640,6 +649,13 @@ export async function registerRoutes(
 
       // Fire CRM webhook (non-blocking)
       fireWebhook("wash_status_update", { jobId: job.id, plate: job.plateDisplay, plateNormalized: job.plateNormalized, status, serviceCode: job.serviceCode }).catch(() => {});
+
+      // Sync linked CRM booking when wash completes
+      if (status === "complete" && job.bookingId) {
+        updateBookingStatus(job.bookingId, "COMPLETED").catch((err) => {
+          console.error("CRM booking COMPLETED sync failed:", err);
+        });
+      }
 
       // === AUTO-CREDIT LOYALTY POINTS ON COMPLETION (LOCAL) ===
       if (status === "complete" && job) {
@@ -2719,7 +2735,7 @@ export async function registerRoutes(
 
       const plateNormalized = normalizePlate(plate);
 
-      const [frequentParker, membership, loyaltyAccount, crmCustomer, crmMembership, crmSubscription, crmUberDriver] = await Promise.all([
+      const [frequentParker, membership, loyaltyAccount, crmCustomer, crmMembership, crmSubscription, crmUberDriver, crmTodayBooking] = await Promise.all([
         storage.getFrequentParker(tenantId, plateNormalized).catch(() => null),
         storage.findMembershipByPlate(tenantId, plateNormalized).catch(() => null),
         storage.getLoyaltyAccountByPlate(tenantId, plateNormalized).catch(() => null),
@@ -2727,6 +2743,7 @@ export async function registerRoutes(
         findCRMMembershipByPlate(plate).catch(() => null),
         findCRMSubscriptionByPlate(plate).catch(() => null),
         findCRMUberDriverByPlate(plate).catch(() => null),
+        findBookingByPlate(plate).catch(() => null),
       ]);
 
       const activeVouchers = loyaltyAccount
@@ -2747,6 +2764,7 @@ export async function registerRoutes(
         crmSubscription,
         isUberDriver,
         crmUberDriver,
+        crmTodayBooking,
       });
     } catch (error) {
       console.error("Error looking up customer by plate:", error);
@@ -3800,7 +3818,21 @@ export async function registerRoutes(
         payloadJson: { bookingId: booking.id, date, time, serviceId, customerName },
       });
 
-      res.status(201).json({ bookingId: booking.id, message: "Booking submitted. You will be contacted to confirm." });
+      try {
+        await sendPushToAllManagers({
+          title: "New Self-Service Booking",
+          body: `${customerName} — ${date} at ${time}${plateDisplay ? ` (${plateDisplay})` : ""}`,
+          url: "/manager/bookings",
+          tag: `self-booking-${booking.id}`,
+        }, tenantId);
+      } catch (_pushErr) { /* non-blocking */ }
+
+      const ref = booking.id.slice(0, 8).toUpperCase();
+      res.status(201).json({
+        bookingId: booking.id,
+        bookingReference: ref,
+        message: `Booking confirmed! Reference: ${ref}. We look forward to seeing you on ${date} at ${time}.`,
+      });
     } catch (error) {
       console.error("Self-service booking error:", error);
       res.status(500).json({ message: "Failed to submit booking" });
