@@ -1,4 +1,9 @@
 import pg from "pg";
+import {
+  BUSINESS_TIMEZONE,
+  combineBookingDateAndTime,
+  formatBookingDateFromDb,
+} from "./booking-date-utils";
 
 // Booking system database connection
 // This connects to your existing CRM/booking system database
@@ -19,10 +24,32 @@ export function getBookingPool(): pg.Pool | null {
       connectionString: BOOKING_DB_URL,
       ssl: { rejectUnauthorized: false },
       max: 5,
+      options: `-c timezone=${BUSINESS_TIMEZONE}`,
     });
   }
 
   return bookingPool;
+}
+
+function mapCRMBookingRow(row: Record<string, unknown>): CRMBooking {
+  return {
+    id: row.id as string,
+    bookingReference: (row.id as string).slice(-8).toUpperCase(),
+    status: row.status as CRMBooking["status"],
+    bookingDate: formatBookingDateFromDb(row.bookingDate as Date | string),
+    timeSlot: row.timeSlot as string,
+    licensePlate: row.licensePlate as string,
+    vehicleMake: row.vehicleMake as string,
+    vehicleModel: row.vehicleModel as string,
+    vehicleColor: row.vehicleColor as string,
+    serviceName: row.serviceName as string,
+    serviceDescription: row.serviceDescription as string,
+    customerName: row.customerName as string | null,
+    customerEmail: row.customerEmail as string,
+    customerPhone: row.customerPhone as string | null,
+    totalAmount: row.totalAmount as number,
+    notes: row.notes as string | null,
+  };
 }
 
 // Types for CRM Notification
@@ -146,29 +173,12 @@ export async function getUpcomingBookings(limit: number = 20): Promise<CRMBookin
       JOIN "Service" s ON b."serviceId" = s.id
       JOIN "User" u ON b."userId" = u.id
       WHERE b.status IN ('CONFIRMED', 'IN_PROGRESS')
-        AND b."bookingDate" >= CURRENT_DATE - INTERVAL '1 day'
+        AND b."bookingDate"::date >= CURRENT_DATE
       ORDER BY b."bookingDate" ASC, b."timeSlot" ASC
       LIMIT $1
     `, [limit]);
 
-    return result.rows.map(row => ({
-      id: row.id,
-      bookingReference: row.id.slice(-8).toUpperCase(),
-      status: row.status,
-      bookingDate: new Date(row.bookingDate).toISOString().split("T")[0],
-      timeSlot: row.timeSlot,
-      licensePlate: row.licensePlate,
-      vehicleMake: row.vehicleMake,
-      vehicleModel: row.vehicleModel,
-      vehicleColor: row.vehicleColor,
-      serviceName: row.serviceName,
-      serviceDescription: row.serviceDescription,
-      customerName: row.customerName,
-      customerEmail: row.customerEmail,
-      customerPhone: row.customerPhone,
-      totalAmount: row.totalAmount,
-      notes: row.notes,
-    }));
+    return result.rows.map(mapCRMBookingRow);
   } catch (error) {
     console.error("Error fetching bookings from CRM:", error);
     return [];
@@ -203,28 +213,11 @@ export async function getTodayBookings(): Promise<CRMBooking[]> {
       JOIN "Service" s ON b."serviceId" = s.id
       JOIN "User" u ON b."userId" = u.id
       WHERE b.status IN ('CONFIRMED', 'IN_PROGRESS', 'READY_FOR_PICKUP')
-        AND DATE(b."bookingDate") = CURRENT_DATE
+        AND b."bookingDate"::date = CURRENT_DATE
       ORDER BY b."timeSlot" ASC
     `);
 
-    return result.rows.map(row => ({
-      id: row.id,
-      bookingReference: row.id.slice(-8).toUpperCase(),
-      status: row.status,
-      bookingDate: new Date(row.bookingDate).toISOString().split("T")[0],
-      timeSlot: row.timeSlot,
-      licensePlate: row.licensePlate,
-      vehicleMake: row.vehicleMake,
-      vehicleModel: row.vehicleModel,
-      vehicleColor: row.vehicleColor,
-      serviceName: row.serviceName,
-      serviceDescription: row.serviceDescription,
-      customerName: row.customerName,
-      customerEmail: row.customerEmail,
-      customerPhone: row.customerPhone,
-      totalAmount: row.totalAmount,
-      notes: row.notes,
-    }));
+    return result.rows.map(mapCRMBookingRow);
   } catch (error) {
     console.error("Error fetching today's bookings from CRM:", error);
     return [];
@@ -263,32 +256,14 @@ export async function findBookingByPlate(licensePlate: string): Promise<CRMBooki
       JOIN "User" u ON b."userId" = u.id
       WHERE b.status IN ('CONFIRMED', 'IN_PROGRESS')
         AND UPPER(REPLACE(REPLACE(v."licensePlate", ' ', ''), '-', '')) = $1
-        AND b."bookingDate" >= CURRENT_DATE - INTERVAL '1 day'
+        AND b."bookingDate"::date >= CURRENT_DATE - INTERVAL '1 day'
       ORDER BY b."bookingDate" ASC
       LIMIT 1
     `, [normalizedPlate]);
 
     if (result.rows.length === 0) return null;
 
-    const row = result.rows[0];
-    return {
-      id: row.id,
-      bookingReference: row.id.slice(-8).toUpperCase(),
-      status: row.status,
-      bookingDate: new Date(row.bookingDate).toISOString().split("T")[0],
-      timeSlot: row.timeSlot,
-      licensePlate: row.licensePlate,
-      vehicleMake: row.vehicleMake,
-      vehicleModel: row.vehicleModel,
-      vehicleColor: row.vehicleColor,
-      serviceName: row.serviceName,
-      serviceDescription: row.serviceDescription,
-      customerName: row.customerName,
-      customerEmail: row.customerEmail,
-      customerPhone: row.customerPhone,
-      totalAmount: row.totalAmount,
-      notes: row.notes,
-    };
+    return mapCRMBookingRow(result.rows[0]);
   } catch (error) {
     console.error("Error searching booking by plate:", error);
     return null;
@@ -948,27 +923,10 @@ export async function getBookingWithMembership(bookingId: string): Promise<CRMBo
     if (bookingResult.rows.length === 0) return null;
 
     const row = bookingResult.rows[0];
-    const booking: CRMBooking = {
-      id: row.id,
-      bookingReference: row.id.slice(-8).toUpperCase(),
-      status: row.status,
-      bookingDate: new Date(row.bookingDate).toISOString().split("T")[0],
-      timeSlot: row.timeSlot,
-      licensePlate: row.licensePlate,
-      vehicleMake: row.vehicleMake,
-      vehicleModel: row.vehicleModel,
-      vehicleColor: row.vehicleColor,
-      serviceName: row.serviceName,
-      serviceDescription: row.serviceDescription,
-      customerName: row.customerName,
-      customerEmail: row.customerEmail,
-      customerPhone: row.customerPhone,
-      totalAmount: row.totalAmount,
-      notes: row.notes,
-    };
+    const booking = mapCRMBookingRow(row);
 
     // Try to find an active subscription for this customer
-    const subscription = await findCRMSubscriptionByPlate(row.licensePlate);
+    const subscription = await findCRMSubscriptionByPlate(row.licensePlate as string);
 
     return {
       ...booking,
@@ -1017,6 +975,23 @@ export interface CRMBookingExtended extends CRMBooking {
   canCustomerModify: boolean;
   lastModifiedBy?: string;
   lastModifiedAt?: Date;
+}
+
+function mapCRMBookingRowExtended(
+  row: Record<string, unknown>,
+  now: Date,
+  oneHourFromNow: Date,
+): CRMBookingExtended {
+  const booking = mapCRMBookingRow(row);
+  const bookingDateTime = combineBookingDateAndTime(booking.bookingDate, booking.timeSlot);
+  const isWithinOneHour = bookingDateTime <= oneHourFromNow && bookingDateTime >= now;
+
+  return {
+    ...booking,
+    isWithinOneHour,
+    canCustomerModify: !isWithinOneHour && row.status === "CONFIRMED",
+    lastModifiedAt: row.updatedAt ? new Date(row.updatedAt as string | Date) : undefined,
+  };
 }
 
 // Get all bookings with filters (for manager view)
@@ -1069,13 +1044,13 @@ export async function getManagerBookings(filters?: BookingFilters): Promise<{ bo
     }
 
     if (filters?.fromDate) {
-      query += ` AND b."bookingDate" >= $${paramIndex++}`;
-      params.push(filters.fromDate);
+      query += ` AND b."bookingDate"::date >= $${paramIndex++}::date`;
+      params.push(formatBookingDateFromDb(filters.fromDate));
     }
 
     if (filters?.toDate) {
-      query += ` AND b."bookingDate" <= $${paramIndex++}`;
-      params.push(filters.toDate);
+      query += ` AND b."bookingDate"::date <= $${paramIndex++}::date`;
+      params.push(formatBookingDateFromDb(filters.toDate));
     }
 
     if (filters?.customerSearch) {
@@ -1115,36 +1090,9 @@ export async function getManagerBookings(filters?: BookingFilters): Promise<{ bo
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
 
-    const bookings: CRMBookingExtended[] = result.rows.map(row => {
-      // Parse booking date and time
-      const bookingDateTime = new Date(row.bookingDate);
-      const [hours, minutes] = (row.timeSlot || "00:00").split(":").map(Number);
-      bookingDateTime.setHours(hours || 0, minutes || 0, 0, 0);
-
-      const isWithinOneHour = bookingDateTime <= oneHourFromNow && bookingDateTime >= now;
-
-      return {
-        id: row.id,
-        bookingReference: row.id.slice(-8).toUpperCase(),
-        status: row.status,
-        bookingDate: new Date(row.bookingDate).toISOString().split("T")[0],
-        timeSlot: row.timeSlot,
-        licensePlate: row.licensePlate,
-        vehicleMake: row.vehicleMake,
-        vehicleModel: row.vehicleModel,
-        vehicleColor: row.vehicleColor,
-        serviceName: row.serviceName,
-        serviceDescription: row.serviceDescription,
-        customerName: row.customerName,
-        customerEmail: row.customerEmail,
-        customerPhone: row.customerPhone,
-        totalAmount: row.totalAmount,
-        notes: row.notes,
-        isWithinOneHour,
-        canCustomerModify: !isWithinOneHour && row.status === 'CONFIRMED',
-        lastModifiedAt: row.updatedAt ? new Date(row.updatedAt) : undefined,
-      };
-    });
+    const bookings: CRMBookingExtended[] = result.rows.map((row) =>
+      mapCRMBookingRowExtended(row, now, oneHourFromNow),
+    );
 
     console.log(`Manager Bookings: Found ${bookings.length} bookings out of ${total} total`);
     return { bookings, total };
@@ -1198,33 +1146,7 @@ export async function getBookingById(bookingId: string): Promise<CRMBookingExten
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
 
-    const bookingDateTime = new Date(row.bookingDate);
-    const [hours, minutes] = (row.timeSlot || "00:00").split(":").map(Number);
-    bookingDateTime.setHours(hours || 0, minutes || 0, 0, 0);
-
-    const isWithinOneHour = bookingDateTime <= oneHourFromNow && bookingDateTime >= now;
-
-    return {
-      id: row.id,
-      bookingReference: row.id.slice(-8).toUpperCase(),
-      status: row.status,
-      bookingDate: new Date(row.bookingDate).toISOString().split("T")[0],
-      timeSlot: row.timeSlot,
-      licensePlate: row.licensePlate,
-      vehicleMake: row.vehicleMake,
-      vehicleModel: row.vehicleModel,
-      vehicleColor: row.vehicleColor,
-      serviceName: row.serviceName,
-      serviceDescription: row.serviceDescription,
-      customerName: row.customerName,
-      customerEmail: row.customerEmail,
-      customerPhone: row.customerPhone,
-      totalAmount: row.totalAmount,
-      notes: row.notes,
-      isWithinOneHour,
-      canCustomerModify: !isWithinOneHour && row.status === 'CONFIRMED',
-      lastModifiedAt: row.updatedAt ? new Date(row.updatedAt) : undefined,
-    };
+    return mapCRMBookingRowExtended(row, now, oneHourFromNow);
   } catch (error) {
     console.error("Error fetching booking by ID:", error);
     return null;
@@ -1235,7 +1157,7 @@ export async function getBookingById(bookingId: string): Promise<CRMBookingExten
 export async function updateBooking(
   bookingId: string,
   updates: {
-    bookingDate?: Date;
+    bookingDate?: Date | string;
     timeSlot?: string;
     serviceId?: string;
     notes?: string;
@@ -1251,8 +1173,12 @@ export async function updateBooking(
     let paramIndex = 1;
 
     if (updates.bookingDate) {
-      setClauses.push(`"bookingDate" = $${paramIndex++}`);
-      params.push(updates.bookingDate);
+      const dateStr =
+        typeof updates.bookingDate === "string"
+          ? updates.bookingDate
+          : formatBookingDateFromDb(updates.bookingDate);
+      setClauses.push(`"bookingDate" = $${paramIndex++}::date`);
+      params.push(dateStr);
     }
 
     if (updates.timeSlot) {
@@ -1327,11 +1253,14 @@ export async function isTimeSlotAvailable(
     let query = `
       SELECT COUNT(*) as count
       FROM "Booking"
-      WHERE DATE("bookingDate") = DATE($1)
+      WHERE "bookingDate"::date = $1::date
         AND "timeSlot" = $2
         AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
     `;
-    const params: any[] = [date, timeSlot];
+    const params: any[] = [
+      typeof date === "string" ? date : formatBookingDateFromDb(date),
+      timeSlot,
+    ];
 
     if (excludeBookingId) {
       query += ` AND id != $3`;
@@ -1385,9 +1314,9 @@ export async function getAvailableTimeSlots(date: Date): Promise<string[]> {
     const result = await pool.query(`
       SELECT "timeSlot"
       FROM "Booking"
-      WHERE DATE("bookingDate") = DATE($1)
+      WHERE "bookingDate"::date = $1::date
         AND status NOT IN ('CANCELLED', 'NO_SHOW', 'COMPLETED')
-    `, [date]);
+    `, [typeof date === "string" ? date : formatBookingDateFromDb(date)]);
 
     const bookedSlots = new Set(result.rows.map(r => r.timeSlot));
 

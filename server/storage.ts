@@ -1,5 +1,6 @@
 import { eq, and, isNull, isNotNull, desc, gte, lt, sql, lte, between, or, asc } from "drizzle-orm";
 import { db } from "./db";
+import { formatBookingDateFromDb, todayInBusinessTimezone } from "./lib/booking-date-utils";
 import {
   washJobs, washPhotos, parkingSessions, eventLogs, userRoles, users,
   customerJobAccess, serviceChecklistItems, customerConfirmations, photoRules,
@@ -2820,7 +2821,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTodayBookings(tenantId: string): Promise<Booking[]> {
-    const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
+    const today = todayInBusinessTimezone();
     return db.select().from(bookings).where(and(
       eq(bookings.tenantId, tenantId),
       eq(bookings.bookingDate, today),
@@ -2829,8 +2830,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUpcomingBookings(tenantId: string, days: number = 7): Promise<Booking[]> {
-    const today = new Date().toISOString().split("T")[0];
-    const futureDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const today = todayInBusinessTimezone();
+    const futureDate = formatBookingDateFromDb(new Date(Date.now() + days * 24 * 60 * 60 * 1000));
     return db.select().from(bookings).where(and(
       eq(bookings.tenantId, tenantId),
       gte(bookings.bookingDate, today),
@@ -2928,9 +2929,9 @@ export class DatabaseStorage implements IStorage {
     bookingRevenue: number;
   }> {
     const tf = eq(bookings.tenantId, tenantId);
-    const today = new Date().toISOString().split("T")[0];
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const today = todayInBusinessTimezone();
+    const weekAgo = formatBookingDateFromDb(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    const monthAgo = formatBookingDateFromDb(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
     const [todayResult] = await db.select({ count: sql<number>`count(*)::int` }).from(bookings).where(and(tf, eq(bookings.bookingDate, today)));
     const [weekResult] = await db.select({ count: sql<number>`count(*)::int` }).from(bookings).where(and(tf, gte(bookings.bookingDate, weekAgo)));

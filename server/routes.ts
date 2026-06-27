@@ -2393,7 +2393,7 @@ export async function registerRoutes(
       const { bookingDate, timeSlot, serviceId, notes, status } = req.body;
 
       const updates: any = {};
-      if (bookingDate) updates.bookingDate = new Date(bookingDate);
+      if (bookingDate) updates.bookingDate = bookingDate;
       if (timeSlot) updates.timeSlot = timeSlot;
       if (serviceId) updates.serviceId = serviceId;
       if (notes !== undefined) updates.notes = notes;
