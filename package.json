@@ -14,7 +14,8 @@
     "db:push": "drizzle-kit push",
     "db:clear": "tsx server/clear-dummy-data.ts",
     "db:seed-users": "tsx server/seed-users.ts",
-    "db:reset-users": "tsx server/reset-users.ts"
+    "db:reset-users": "tsx server/reset-users.ts",
+    "db:clear-test-bookings": "tsx server/clear-test-bookings.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.996.0",
